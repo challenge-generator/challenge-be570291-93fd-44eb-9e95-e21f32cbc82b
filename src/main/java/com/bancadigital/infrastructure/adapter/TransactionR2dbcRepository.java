@@ -1,0 +1,162 @@
+package com.bancadigital.infrastructure.adapter;
+
+import com.bancadigital.domain.model.Transaction;
+import com.bancadigital.domain.model.Transaction.TransactionStatus;
+import com.bancadigital.domain.port.TransactionRepository;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.relational.core.mapping.Column;
+import org.springframework.data.relational.core.mapping.Table;
+import org.springframework.data.r2dbc.core.R2dbcEntityTemplate;
+import org.springframework.data.r2dbc.core.ReactiveSelect;
+import org.springframework.data.r2dbc.core.ReactiveInsert;
+import org.springframework.data.r2dbc.query.Query;
+import org.springframework.stereotype.Repository;
+import reactor.core.publisher.Mono;
+
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Repository
+public class TransactionR2dbcRepository implements TransactionRepository {
+
+    private final R2dbcEntityTemplate entityTemplate;
+
+    public TransactionR2dbcRepository(R2dbcEntityTemplate entityTemplate) {
+        this.entityTemplate = entityTemplate;
+    }
+
+    @Override
+    public Mono<Transaction> save(Transaction transaction) {
+        TransactionEntity entity = toEntity(transaction);
+        return entityTemplate.insert(entity)
+                .map(this::toDomain);
+    }
+
+    @Override
+    public Mono<Transaction> findById(UUID transactionId) {
+        Query query = Query.query(
+                org.springframework.data.domain.ReactivePageable.of(
+                        org.springframework.data.domain.Pageable.ofSize(1)));
+        return entityTemplate.select(TransactionEntity.class)
+                .matching(query)
+                .first()
+                .map(this::toDomain);
+    }
+
+    @Override
+    public Mono<Transaction> findByIdempotencyKey(String idempotencyKey) {
+        return entityTemplate.select(TransactionEntity.class)
+                .from("transactions")
+                .matching(Query.query(
+                        org.springframework.data.r2dbc.core.where(
+                                org.springframework.data.r2dbc.core.Columns.from("idempotency_key")
+                                        .is(idempotencyKey))))
+                .first()
+                .map(this::toDomain);
+    }
+
+    @Override
+    public Mono<Boolean> existsByIdempotencyKey(String idempotencyKey) {
+        return entityTemplate.getDatabaseClient()
+                .sql("SELECT COUNT(*) FROM transactions WHERE idempotency_key = :key")
+                .bind("key", idempotencyKey)
+                .map((row, metadata) -> row.get(0, Long.class) > 0)
+                .first();
+    }
+
+    @Override
+    public Mono<Void> deleteById(UUID transactionId) {
+        return entityTemplate.delete(TransactionEntity.class)
+                .matching(Query.query(
+                        org.springframework.data.r2dbc.core.where(
+                                org.springframework.data.r2dbc.core.Columns.from("transaction_id")
+                                        .is(transactionId.toString()))))
+                .then();
+    }
+
+    private TransactionEntity toEntity(Transaction transaction) {
+        TransactionEntity entity = new TransactionEntity();
+        entity.setTransactionId(transaction.getTransactionId().toString());
+        entity.setOperationNumber(transaction.getOperationNumber());
+        entity.setChannel(transaction.getChannel());
+        entity.setAmount(transaction.getAmount());
+        entity.setStatus(transaction.getStatus().name());
+        entity.setCreatedAt(transaction.getCreatedAt());
+        entity.setUpdatedAt(transaction.getUpdatedAt());
+        entity.setAccountFrom(transaction.getAccountFrom());
+        entity.setAccountTo(transaction.getAccountTo());
+        entity.setIdempotencyKey(transaction.getIdempotencyKey());
+        return entity;
+    }
+
+    private Transaction toDomain(TransactionEntity entity) {
+        return Transaction.builder()
+                .transactionId(UUID.fromString(entity.getTransactionId()))
+                .operationNumber(entity.getOperationNumber())
+                .channel(entity.getChannel())
+                .amount(entity.getAmount())
+                .status(TransactionStatus.valueOf(entity.getStatus()))
+                .createdAt(entity.getCreatedAt())
+                .updatedAt(entity.getUpdatedAt())
+                .accountFrom(entity.getAccountFrom())
+                .accountTo(entity.getAccountTo())
+                .idempotencyKey(entity.getIdempotencyKey())
+                .build();
+    }
+
+    @Table("transactions")
+    private static class TransactionEntity {
+        @Id
+        @Column("transaction_id")
+        private String transactionId;
+
+        @Column("operation_number")
+        private String operationNumber;
+
+        @Column("channel")
+        private String channel;
+
+        @Column("amount")
+        private BigDecimal amount;
+
+        @Column("status")
+        private String status;
+
+        @Column("created_at")
+        private LocalDateTime createdAt;
+
+        @Column("updated_at")
+        private LocalDateTime updatedAt;
+
+        @Column("account_from")
+        private String accountFrom;
+
+        @Column("account_to")
+        private String accountTo;
+
+        @Column("idempotency_key")
+        private String idempotencyKey;
+
+        public String getTransactionId() { return transactionId; }
+        public void setTransactionId(String transactionId) { this.transactionId = transactionId; }
+        public String getOperationNumber() { return operationNumber; }
+        public void setOperationNumber(String operationNumber) { this.operationNumber = operationNumber; }
+        public String getChannel() { return channel; }
+        public void setChannel(String channel) { this.channel = channel; }
+        public BigDecimal getAmount() { return amount; }
+        public void setAmount(BigDecimal amount) { this.amount = amount; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+        public LocalDateTime getCreatedAt() { return createdAt; }
+        public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+        public LocalDateTime getUpdatedAt() { return updatedAt; }
+        public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+        public String getAccountFrom() { return accountFrom; }
+        public void setAccountFrom(String accountFrom) { this.accountFrom = accountFrom; }
+        public String getAccountTo() { return accountTo; }
+        public void setAccountTo(String accountTo) { this.accountTo = accountTo; }
+        public String getIdempotencyKey() { return idempotencyKey; }
+        public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
+    }
+}

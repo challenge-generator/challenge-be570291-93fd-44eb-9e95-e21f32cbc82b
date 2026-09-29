@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: transaction-service
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/bancadb
+    username: bancauser
+    password: bancapass
+    pool:
+      enabled: true
+      initial-size: 10
+      max-size: 20
+      max-idle-time: 30m
+      validation-query: SELECT 1
+  redis:
+    host: localhost
+    port: 6379
+    timeout: 2000ms
+    lettuce:
+      pool:
+        max-active: 16
+        max-idle: 8
+        min-idle: 4
+  cache:
+    type: redis
+    redis:
+      time-to-live: 86400000 # 24 horas en milisegundos para idempotencia
+
+server:
+  port: 8080
+  netty:
+    connection-timeout: 2000ms
+    idle-timeout: 30000ms
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        permittedNumberOfCallsInHalfOpenState: 3
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 50
+        eventConsumerBufferSize: 10
+  retry:
+    configs:
+      default:
+        maxRetryAttempts: 3
+        waitDuration: 500ms
+  timelimiter:
+    configs:
+      default:
+        timeoutDuration: 2s
+
+idempotency:
+  key-prefix: "idempotency:"
+  ttl-hours: 24
+
+logging:
+  level:
+    root: INFO
+    com.bancadigital: DEBUG
+    org.springframework.r2dbc: DEBUG
+    io.r2dbc.postgresql: DEBUG
+    reactor.netty: DEBUG
